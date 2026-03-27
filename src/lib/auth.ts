@@ -1,4 +1,5 @@
 import type { IncomingMessage } from "node:http";
+import { URL } from "node:url";
 
 // Validate MCP_SECRET is present at startup — fail fast if missing
 if (!process.env.MCP_SECRET) {
@@ -7,10 +8,19 @@ if (!process.env.MCP_SECRET) {
 }
 
 /**
- * Returns true if the request carries a valid Bearer token matching MCP_SECRET.
+ * Returns true if the request carries a valid token matching MCP_SECRET.
+ * Accepts either:
+ *   - Authorization: Bearer <secret>  (header)
+ *   - ?token=<secret>                 (query param, for clients that can't set headers)
  * Never logs the secret value.
  */
 export function isAuthorized(req: IncomingMessage): boolean {
+  // Check Authorization header
   const authHeader = req.headers["authorization"] ?? "";
-  return authHeader === `Bearer ${process.env.MCP_SECRET}`;
+  if (authHeader === `Bearer ${process.env.MCP_SECRET}`) return true;
+
+  // Check ?token= query param
+  const base = `http://localhost${req.url ?? ""}`;
+  const token = new URL(base).searchParams.get("token") ?? "";
+  return token === process.env.MCP_SECRET;
 }

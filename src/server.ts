@@ -14,14 +14,12 @@ const { version } = require("../package.json") as { version: string };
 
 const PORT = parseInt(process.env.PORT ?? "3456", 10);
 
-// Instantiate MCP server
-const mcpServer = new McpServer({ name: "lmw-desktop", version });
-registerAllTools(mcpServer);
-
-// HTTP server — stateless: a fresh transport is created per request
+// HTTP server — stateless: a fresh McpServer + transport is created per request
 const httpServer = http.createServer(async (req, res) => {
-  // Auth check
-  if (!isAuthorized(req)) {
+  // Only auth-gate POST requests (tool calls).
+  // GET requests are MCP handshake/discovery probes from claude.ai — let them through
+  // so the connector can be created successfully.
+  if (req.method === "POST" && !isAuthorized(req)) {
     log("auth_failed", { method: req.method, url: req.url });
     res.writeHead(401, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Unauthorized" }));
@@ -31,9 +29,16 @@ const httpServer = http.createServer(async (req, res) => {
   log("request", { method: req.method, url: req.url });
 
   try {
-    const body = await readBody(req);
+    const rawBody = await readBody(req);
+    // Transport expects parsed JSON, not a raw Buffer
+    const body = rawBody.length > 0 ? JSON.parse(rawBody.toString()) : undefined;
 
-    // Stateless transport — no session management
+    // Fresh server + transport per request (required for stateless mode —
+    // reusing a single McpServer across requests causes connect() to fail
+    // on the second request since the server is already bound to a transport)
+    const mcpServer = new McpServer({ name: "lmw-desktop", version });
+    registerAllTools(mcpServer);
+
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });
